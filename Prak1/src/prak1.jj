@@ -1,0 +1,70 @@
+PARSER_BEGIN(WHILE0)
+public class WHILE0
+{
+    public static void main (String args[])
+    {
+        WHILE0 parser = new WHILE0(System.in);
+        try {
+            parser.start();
+        } catch (ParseException e) {
+            System.err.println(e);
+        }
+    }
+}
+PARSER_END(WHILE0)
+SKIP:
+{ "\r" | "\n" | "\t" | " " }
+TOKEN:
+{
+<WHILE: "while"> | <DO: "do"> | <BEGIN: "begin"> | <END: "end">
+|
+<IN: "in"> | <OUT: "out">
+|
+<VAR: "var">
+|
+<IDENT: ["a"-"z", "A"-"Z"](["a"-"z","A"-"Z","0"-"9"])*>
+}
+void start():
+{}
+{
+    Prog() <EOF>
+    {
+        System.out.println("WHILE0 formal ok!");
+    }
+}
+
+void Prog():
+{}
+{
+    Name() Vars() Alpha()
+}
+
+void Name():
+{}
+{
+    <IDENT> "(" <IN> (<IDENT> ("," <IDENT>)*)? ";" <OUT> <IDENT> ")" ";"
+}
+
+void Vars():
+{}
+{
+    <VAR> "(" ( <IDENT> ("," <IDENT>)* )? ")" ";"
+}
+
+void Alpha():
+{}
+{
+    (Assign() | While()) (";" Alpha())?
+}
+
+void Assign():
+{}
+{
+    <IDENT> "=" (<IDENT> "+" "1" | "0")
+}
+
+void While():
+{}
+{
+    <WHILE> <IDENT> "!=" <IDENT> <DO> <BEGIN> Alpha() <END>
+}

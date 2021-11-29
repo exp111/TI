@@ -1,0 +1,307 @@
+PARSER_BEGIN(WHILE0)
+import java.nio.file.Files;
+import java.io.InputStream;
+import java.nio.file.Paths;
+import java.io.IOException;
+import java.util.*;
+import java.text.MessageFormat;
+import javafx.util.Pair;
+import java.util.regex.*;
+
+public class WHILE0
+{
+    public static void main (String args[])
+    {
+        try {
+            InputStream in = Files.newInputStream(Paths.get("../src/mult.txt"));
+            WHILE0 parser = new WHILE0(in);
+            parser.start();
+        } catch (IOException e) {
+            System.err.println(e);
+        } catch (ParseException e) {
+            System.err.println(e);
+        } catch (Exception e) {
+            System.err.println(e);
+        }
+    }
+
+    // Helper
+    // - Register Stuff
+    public static Hashtable<String, String> registerRegister = new Hashtable<String, String>();
+    public static int registerCount = 1;
+
+    // This gets called to register the variables as registers
+    public static String RegisterVar(String var)
+    {
+        String ret = "R" + registerCount++;
+        registerRegister.put(var, ret);
+        return ret;
+    }
+    // Sometimes we need a local temp var. No need to keep track of them inside the register
+    public static String GetTempVar()
+    {
+        return "R" + registerCount++;
+    }
+    // This then resolves the variables in the program to the registers
+    public static String GetRegister(String var) throws Exception
+    {
+        String register = registerRegister.get(var);
+        if (register == null)
+        {
+            throw new Exception(var + " is not a registered Variable!");
+        }
+        return register;
+    }
+
+    // - Label Stuff
+    public static Integer labelCount = 0;
+
+    // Gets a new label prefix to be resolved later
+    public static String GetLabel()
+    {
+        return "label" + labelCount++;
+    }
+
+    // idea: add labels with "labelX_bla:" to program. after everything is done,
+    // split program by newline, search for labels and add them to a map with the corresponding line number.
+    // then resolve every goto labelX_bla to the real line number.
+    private static Pattern labelPattern = Pattern.compile("(label\\d*_\\w*): *(.*)");
+    private static Pattern gotoLabelPattern = Pattern.compile("goto (label\\d*_\\w*)");
+    public static String ResolveLabels(String program)
+    {
+        Hashtable<String, Integer> jumpMap = new Hashtable<String, Integer>();
+        String[] pro = program.split("\n");
+        Vector<String> source = new Vector();
+        int offset = 0;
+        // Search for "labelX_bla:" and remove them (including the leading space, if exists)
+        // If the line only contains the labelX_bla, remove it completely and instead link to the next line
+        for (int i = 0; i < pro.length; i++)
+        {
+            String line = pro[i];
+            Matcher m = labelPattern.matcher(line);
+            if (m.matches())
+            {
+                jumpMap.put(m.group(1), i+1-offset); // if we got rid of any empty lines
+                pro[i] = m.group(2);
+                System.out.println("Removed " + m.group(1) + " from " + m.group(2));
+            }
+
+            // if the line now isn't empty, add it to the new array
+            if (pro[i].length() != 0)
+                source.add(pro[i]);
+            else
+                offset++;
+        }
+
+        // Then search for goto labelX_bla in the new array and replace with line number
+        for (int i = 0; i < source.size(); i++)
+        {
+            String line = source.get(i);
+            Matcher m = gotoLabelPattern.matcher(line);
+            if (m.find())
+            {
+                source.set(i, m.replaceFirst("goto " + jumpMap.get(m.group(1))));
+            }
+        }
+
+        return String.join("\n", source);
+    }
+
+    // - Macros
+    public static String COPY(String Vi, String Vj)
+    {
+        String tempVar = GetTempVar();
+        String labelPrefix = GetLabel();
+        return MessageFormat.format("{0} = 0;\n"+
+                        "{3}_loop1: if {1} == 0 goto {3}_loop2;\n"+
+                        "{1}--;\n"+
+                        "{2}++;\n"+
+                        "goto {3}_loop1;\n"+
+                        "{3}_loop2: if {2} == 0 goto {3}_end;\n"+
+                        "{2}--;\n"+
+                        "{1}++;\n"+
+                        "{0}++;\n"+
+                        "goto {3}_loop2;\n"+
+                        "{3}_end:", Vi, Vj, tempVar, labelPrefix);
+    }
+    // - Assignments
+    public static String AssignmentZero(String var) throws Exception
+    {
+        return GetRegister(var) + " = 0;";
+    }
+    public static String AssignmentPlusOne(String var, String Vj) throws Exception
+    {
+        String Ri = GetRegister(var);
+        String Rj = GetRegister(Vj);
+        if(Ri != Rj)
+            return MessageFormat.format("{0}\n{1}++;", COPY(Ri, Rj), Ri);
+        else
+            return MessageFormat.format("{0}++;", Ri);
+    }
+
+    // - While
+    public static String While(String V1, String V2, String alpha) throws Exception
+    {
+        String A = GetTempVar();
+        String B = GetTempVar();
+        String R1 = GetRegister(V1);
+        String R2 = GetRegister(V2);
+
+        String labelPrefix = GetLabel();
+        return MessageFormat.format("{5}_start: {0}\n"+
+                        "{1}\n"+
+                        "{5}_loop: if {2} == 0 goto {5}_end1;\n"+
+                        "if {3} == 0 goto {5}_end2;\n"+
+                        "{2}--;\n"+
+                        "{3}--;\n"+
+                        "goto {5}_loop;\n"+
+                        "{5}_end1: if {3} == 0 goto {5}_fail;\n"+
+                        "goto {5}_success;\n"+
+                        "{5}_end2: if {2} == 0 goto {5}_fail;\n"+
+                        "goto {5}_success;\n"+
+                        "{5}_success: {4}\n"+
+                        "goto {5}_start;\n"+
+                        "{5}_fail:", COPY(A, R1), COPY(B, R2), A, B, alpha, labelPrefix);
+    }
+}
+PARSER_END(WHILE0)
+SKIP:
+{ "\r" | "\n" | "\t" | " " }
+TOKEN:
+{
+<WHILE: "while"> | <DO: "do"> | <BEGIN: "begin"> | <END: "end">
+|
+<IN: "in"> | <OUT: "out">
+|
+<VAR: "var">
+|
+<IDENT: ["a"-"z", "A"-"Z"](["a"-"z","A"-"Z","0"-"9"])*>
+}
+void start() throws Exception:
+{
+    String program = "";
+}
+{
+    program=Prog() <EOF>
+    {
+        System.out.println("WHILE0 formal ok!\n");
+        System.out.println(program);
+    }
+}
+
+String Prog() throws Exception:
+{
+    Pair<String, String> name;
+    String alpha = "";
+}
+{
+    name=Name() Vars() alpha=Alpha()
+    {
+        String in = name.getKey();
+        String out = name.getValue();
+        return in + "\n" + ResolveLabels(alpha) + "\n" + out;
+    }
+}
+
+Vector Args():
+{
+    Vector args = new Vector();
+    Token ident;
+}
+{
+    (
+        ident=<IDENT>
+        {
+            args.add(ident.image.toString());
+        }
+        ("," ident=<IDENT>)*
+        {
+            args.add(ident.image.toString());
+        }
+    )?
+    {
+        return args;
+    }
+}
+
+Pair<String, String> Name(): //returns [in(...), out(...)]
+{
+    Vector<String> in;
+    Token out;
+}
+{
+    <IDENT> "(" <IN> in=Args() ";" <OUT> out=<IDENT> ")" ";"
+    {
+        String ret = "in(";
+        for (String var : in)
+        {
+            if (ret.length() == 3)
+                ret += RegisterVar(var);
+            else
+                ret += ", " + RegisterVar(var);
+        }
+        ret += ");";
+        String outRegister = RegisterVar(out.image.toString());
+        String outRet = "out(" + outRegister + ");";
+
+        System.out.println("In: " + String.join(", ", in) + "; Out: " + out);
+        return new Pair<String, String>(ret, outRet);
+    }
+}
+
+void Vars():
+{
+    Vector<String> vars;
+}
+{
+    <VAR> "(" vars=Args() ")" ";"
+    {
+        for (String var : vars)
+        {
+            RegisterVar(var);
+        }
+        System.out.println("Vars: " + String.join(",", vars));
+    }
+}
+
+String Alpha() throws Exception:
+{
+    String a = "";
+    String alpha = "";
+}
+{
+    (a=Assign() | a=While()) (";" alpha=Alpha())?
+    {
+        return a + (alpha != "" ? "\n" + alpha : "");
+    }
+}
+
+String Assign() throws Exception:
+{
+    Token ident1;
+    Token ident2 = null;
+}
+{
+    ident1=<IDENT> "=" (ident2=<IDENT> "+" "1" | "0")
+    {
+        String var = ident1.image.toString();
+        System.out.println("Assignment:\n");
+        return (ident2 != null ?
+                    AssignmentPlusOne(var, ident2.image.toString()):
+                    AssignmentZero(var));
+    }
+}
+
+String While() throws Exception:
+{
+    Token ident1;
+    Token ident2;
+    String alpha = "";
+}
+{
+    <WHILE> ident1=<IDENT> "!=" ident2=<IDENT> <DO> <BEGIN> alpha=Alpha() <END>
+    {
+        System.out.println("While: " + ident1.image.toString() + "!=" + ident2.image.toString() + "\n");
+        return While(ident1.image.toString(), ident2.image.toString(), alpha);
+    }
+}
